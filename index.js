@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import voice from "elevenlabs-node";
 import express from "express";
 import { promises as fs } from "fs";
-import OpenAI from "openai";
+import OpenAI from "openai/index.mjs";
 dotenv.config();
 
 const openai = new OpenAI({
@@ -12,20 +12,26 @@ const openai = new OpenAI({
 });
 
 const elevenLabsApiKey = process.env.ELEVEN_LABS_API_KEY;
-const voiceID = "kgG7dCoKCfLehAPWkJOE";
+const voiceID = "9BWtsMINqrJLrRacOk9x";
 
 const app = express();
 app.use(express.json());
-app.use(cors());
-const port = 3000;
+app.use(cors({
+  origin: ['https://mentor-ai-avatar-front-end.vercel.app', 'http://localhost:3000'],
+  methods: ['GET', 'POST'],
+  credentials: true
+}));
+const port = process.env.PORT || 3001;
 
-app.get("/", (req, res) => {
-  res.send("Hello World!");
-});
-
-app.get("/voices", async (req, res) => {
-  res.send(await voice.getVoices(elevenLabsApiKey));
-});
+// Add mouth shape constants
+const MOUTH_SHAPES = {
+  REST: "M30,60 Q50,70 70,60",  // Closed mouth
+  A: "M30,65 Q50,75 70,65",     // Wide open for A sounds
+  B: "M30,62 Q50,68 70,62",     // Slightly open for B/P sounds
+  F: "M30,63 Q50,63 70,63",     // Flat for F/V sounds
+  L: "M30,61 Q50,65 70,61",     // Tongue up for L sounds
+  O: "M30,58 Q50,68 70,58"      // Round for O sounds
+};
 
 const execCommand = (command) => {
   return new Promise((resolve, reject) => {
@@ -36,18 +42,43 @@ const execCommand = (command) => {
   });
 };
 
-const lipSyncMessage = async (message) => {
+const generatePhonemes = (text) => {
+  // Simple phoneme detection
+  return text.toLowerCase().split('').map(char => {
+    if ('aeiou'.includes(char)) return 'A';
+    if ('bpm'.includes(char)) return 'B';
+    if ('fv'.includes(char)) return 'F';
+    if ('l'.includes(char)) return 'L';
+    if ('o'.includes(char)) return 'O';
+    return 'REST';
+  });
+};
+
+const lipSyncMessage = async (message, text) => {
   const time = new Date().getTime();
   console.log(`Starting conversion for message ${message}`);
+  
+  // Convert audio
   await execCommand(
     `ffmpeg -y -i audios/message_${message}.mp3 audios/message_${message}.wav`
-    // -y to overwrite the file
   );
   console.log(`Conversion done in ${new Date().getTime() - time}ms`);
-  await execCommand(
-    `./bin/rhubarb -f json -o audios/message_${message}.json audios/message_${message}.wav -r phonetic`
+
+  // Generate lip sync data
+  const phonemes = generatePhonemes(text);
+  const lipSyncData = phonemes.map((phoneme, index) => ({
+    value: phoneme,
+    start: index * 0.1,
+    end: (index + 1) * 0.1
+  }));
+
+  // Save lip sync data
+  await fs.writeFile(
+    `audios/message_${message}.json`,
+    JSON.stringify(lipSyncData),
+    'utf8'
   );
-  // -r phonetic is faster but less accurate
+
   console.log(`Lip sync done in ${new Date().getTime() - time}ms`);
 };
 
@@ -126,12 +157,12 @@ app.post("/chat", async (req, res) => {
   }
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
-    // generate audio file
-    const fileName = `audios/message_${i}.mp3`; // The name of your audio file
-    const textInput = message.text; // The text you wish to convert to speech
+    const fileName = `audios/message_${i}.mp3`;
+    const textInput = message.text;
+    
     await voice.textToSpeech(elevenLabsApiKey, voiceID, fileName, textInput);
-    // generate lipsync
-    await lipSyncMessage(i);
+    await lipSyncMessage(i, textInput);
+    
     message.audio = await audioFileToBase64(fileName);
     message.lipsync = await readJsonTranscript(`audios/message_${i}.json`);
   }
@@ -148,6 +179,11 @@ const audioFileToBase64 = async (file) => {
   const data = await fs.readFile(file);
   return data.toString("base64");
 };
+
+// Add a redirect route for the avatar
+app.get("/avatar", (req, res) => {
+  res.redirect('https://mentor-ai-avatar-front-end.vercel.app/');
+});
 
 app.listen(port, () => {
   console.log(`Virtual Girlfriend listening on port ${port}`);
