@@ -5,6 +5,8 @@ import voice from "elevenlabs-node";
 import express from "express";
 import { promises as fs } from "fs";
 import OpenAI from "openai/index.mjs";
+import path from 'path';
+import { fileURLToPath } from 'url';
 dotenv.config();
 
 const openai = new OpenAI({
@@ -22,6 +24,8 @@ app.use(cors({
   credentials: true
 }));
 const port = process.env.PORT || 3000;
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Add mouth shape constants
 const MOUTH_SHAPES = {
@@ -54,13 +58,18 @@ const generatePhonemes = (text) => {
   });
 };
 
+const getAudioPath = (filename) => path.join('/tmp', filename);
+
 const lipSyncMessage = async (message, text) => {
   const time = new Date().getTime();
   console.log(`Starting conversion for message ${message}`);
   
+  const inputPath = getAudioPath(`message_${message}.mp3`);
+  const outputPath = getAudioPath(`message_${message}.wav`);
+  
   // Convert audio
   await execCommand(
-    `ffmpeg -y -i audios/message_${message}.mp3 audios/message_${message}.wav`
+    `ffmpeg -y -i ${inputPath} ${outputPath}`
   );
   console.log(`Conversion done in ${new Date().getTime() - time}ms`);
 
@@ -73,8 +82,9 @@ const lipSyncMessage = async (message, text) => {
   }));
 
   // Save lip sync data
+  const jsonPath = getAudioPath(`message_${message}.json`);
   await fs.writeFile(
-    `audios/message_${message}.json`,
+    jsonPath,
     JSON.stringify(lipSyncData),
     'utf8'
   );
@@ -157,14 +167,14 @@ app.post("/chat", async (req, res) => {
   }
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
-    const fileName = `audios/message_${i}.mp3`;
+    const fileName = getAudioPath(`message_${i}.mp3`);
     const textInput = message.text;
     
     await voice.textToSpeech(elevenLabsApiKey, voiceID, fileName, textInput);
     await lipSyncMessage(i, textInput);
     
     message.audio = await audioFileToBase64(fileName);
-    message.lipsync = await readJsonTranscript(`audios/message_${i}.json`);
+    message.lipsync = await readJsonTranscript(getAudioPath(`message_${i}.json`));
   }
 
   res.send({ messages });
