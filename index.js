@@ -21,7 +21,7 @@ app.use(cors({
   methods: ['GET', 'POST'],
   credentials: true
 }));
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3000;
 
 // Add mouth shape constants
 const MOUTH_SHAPES = {
@@ -185,6 +185,11 @@ app.get("/avatar", (req, res) => {
   res.redirect('https://mentor-ai-avatar-front-end.vercel.app/');
 });
 
+// Basic route
+app.get('/', (req, res) => {
+  res.json({ message: 'Server is running' });
+});
+
 app.listen(port, () => {
-  console.log(`Virtual Girlfriend listening on port ${port}`);
+  console.log(`Server running on port ${port}`);
 });
