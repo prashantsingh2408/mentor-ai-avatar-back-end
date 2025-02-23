@@ -12,6 +12,7 @@ dotenv.config();
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || "-", // Your OpenAI API key here, I used "-" to avoid errors when the key is not set but you should not do that
 });
+const ibmApiKeys = process.env.OPENAI_API_KEY || "KeLVOKnelfNy0lwDEDQy4jbXX_FpUo47SyDGIJVOiW1D"
 
 const elevenLabsApiKey = process.env.ELEVEN_LABS_API_KEY;
 const voiceID = "9BWtsMINqrJLrRacOk9x";
@@ -23,7 +24,17 @@ app.use(cors({
   methods: ['GET', 'POST'],
   credentials: true
 }));
-const port = process.env.PORT || 3000;
+// app.use(cors());
+const port = process.env.PORT || 8080;
+// app.options("*", (req, res) => {
+//   res.header("Access-Control-Allow-Origin", "*");  // Vous pouvez restreindre ça si nécessaire
+//   res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+//   res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+//   res.sendStatus(200); // Répondre avec succès aux requêtes OPTIONS
+// });
+// app.options("*", (req, res) => {
+//   res.sendStatus(200);
+// });
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -190,11 +201,102 @@ const audioFileToBase64 = async (file) => {
   return data.toString("base64");
 };
 
+// get acces_token
+const getIbmToken = async () => {
+  const url = "https://iam.cloud.ibm.com/identity/token";
+  const headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+  const apiKey = ibmApiKeys;
+
+  if (!apiKey) {
+    throw new Error("IBM API Key not found. Set it as an environment variable.");
+  }
+
+  const data = new URLSearchParams({
+    'grant_type': 'urn:ibm:params:oauth:grant-type:apikey',
+    'apikey': apiKey
+  });
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: data
+    });
+    const result = await response.json();
+    return result.access_token;
+    log
+  } catch (error) {
+    console.error("Error fetching IBM token:", error);
+    throw error;
+  }
+}
+
+//  get bot response
+const graniteQuery = async (prompt,systemPrompts) => {
+  const token = await getIbmToken();
+  const url = "https://us-south.ml.cloud.ibm.com/ml/v1/text/generation?version=2023-05-29";
+  const headers = {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+
+  };
+  const systemPrompt = systemPrompts ? systemPrompts : "You are a language learning assistant. If the user speaks in French, respond in French and provide corrections.If the user speaks in English, first respond in English, then provide the French translation. Be friendly and helpful."
+  const payload = {
+    "input": `<|start_of_role|>system<|end_of_role|>${systemPrompt}<|end_of_text|>\n`
+      + `<|start_of_role|>user<|end_of_role|>${prompt}<|end_of_text|>\n`
+      + `<|start_of_role|>assistant<|end_of_role|>`,
+    "parameters": { "max_new_tokens": 300 },
+    "model_id": "ibm/granite-13b-instruct-v2",
+    "project_id": "44e4e31f-bde1-4da6-85ec-7dfbb505cffa"
+  };
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+    // console.log(result);
+
+    return result.results[0].generated_text;
+  } catch (error) {
+    console.error("Error fetching Granite query:", error);
+    throw error;
+  }
+}
+
 // Add a redirect route for the avatar
 app.get("/avatar", (req, res) => {
   res.redirect('https://mentor-ai-avatar-front-end.vercel.app/');
 });
+// chat with ibm models 
+app.post("/agent-chat", async (req, res) => {
+  console.log(req.body.message);
 
+
+  try {
+    const userMessage = req.body.message;
+    const prompt = req.body.prompt
+    // const history = req.body.history
+    // console.log("history ;", req.body);
+    
+   
+    if (!userMessage) {
+      const response = " how can i help you today ?"
+      res.json({ response });
+    }
+    const response = await graniteQuery( userMessage, prompt)
+    console.log("response : ",response);
+    
+    res.json({ response });
+
+  } catch (error) {
+    console.error(error)
+  }
+
+});
 // Basic route
 app.get('/', (req, res) => {
   res.json({ message: 'Server is running' });
